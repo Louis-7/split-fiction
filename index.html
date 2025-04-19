@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dynamic Rotating Split Screen</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      user-select: none;
+      cursor: crosshair;
+      background: #222;
+    }
+
+    .container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Both sides cover entire screen, clipped dynamically */
+    .side {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .left-side {
+      background-image: url(./assets/1.png);
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      z-index: 1;
+      clip-path: polygon(0 0, 50% 0, 50% 100%, 0 100%);
+    }
+
+    .right-side {
+      background-image: url(./assets/2.png);
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      z-index: 1;
+      clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container" id="container">
+    <div class="side left-side" id="leftSide"></div>
+    <div class="side right-side" id="rightSide"></div>
+  </div>
+
+  <script>
+    const container = document.getElementById('container');
+    const leftSide = document.getElementById('leftSide');
+    const rightSide = document.getElementById('rightSide');
+
+    // const radToDeg = (rad) => rad * 180 / Math.PI;
+
+    /**
+     * Calculates the intersection point between an infinite line and a line segment.
+     * @param {number} linePointX - X coordinate of a point on the infinite line.
+     * @param {number} linePointY - Y coordinate of a point on the infinite line.
+     * @param {number} lineDirX - X component of the infinite line's direction vector.
+     * @param {number} lineDirY - Y component of the infinite line's direction vector.
+     * @param {Object} segmentStart - Starting point of the line segment {x, y}.
+     * @param {Object} segmentEnd - Ending point of the line segment {x, y}.
+     * @returns {Object|null} - Intersection point {x, y} or null if no intersection exists.
+     */
+    function lineSegmentIntersection(linePointX, linePointY, lineDirX, lineDirY, segmentStart, segmentEnd) {
+      // Direction vector of the line segment
+      const segmentDirX = segmentEnd.x - segmentStart.x;
+      const segmentDirY = segmentEnd.y - segmentStart.y;
+
+      // Calculate the determinant (cross product of direction vectors)
+      const determinant = lineDirX * segmentDirY - lineDirY * segmentDirX;
+
+      // If determinant is 0, the line and segment are parallel or collinear
+      if (determinant === 0) return null;
+
+      // Calculate parameters t and u
+      const t = ((segmentStart.x - linePointX) * segmentDirY - (segmentStart.y - linePointY) * segmentDirX) / determinant;
+      const u = ((segmentStart.x - linePointX) * lineDirY - (segmentStart.y - linePointY) * lineDirX) / determinant;
+
+      // If u is not in the range [0, 1], the intersection point is outside the segment
+      if (u < 0 || u > 1) return null;
+
+      // Calculate the intersection point
+      return {
+        x: linePointX + t * lineDirX,
+        y: linePointY + t * lineDirY
+      };
+    }
+
+    /**
+     * Orders a set of points in clockwise order around their centroid.
+     * This is useful for defining polygons where the order of points matters.
+     * 
+     * @param {Array<Object>} points - An array of points, each with {x, y} properties.
+     */
+    function orderPointsClockwise(points) {
+      // Step 1: Calculate the centroid (geometric center) of the points.
+      // The centroid is the average of all x and y coordinates.
+      const centroid = points.reduce((acc, p) => ({
+        x: acc.x + p.x,
+        y: acc.y + p.y
+      }), { x: 0, y: 0 });
+      centroid.x /= points.length;
+      centroid.y /= points.length;
+
+      // Step 2: Sort the points based on their angle relative to the centroid.
+      // Use Math.atan2 to calculate the angle between each point and the centroid.
+      points.sort((a, b) => {
+        const angleA = Math.atan2(a.y - centroid.y, a.x - centroid.x); // Angle of point A
+        const angleB = Math.atan2(b.y - centroid.y, b.x - centroid.x); // Angle of point B
+        return angleA - angleB; // Sort in ascending order of angle
+      });
+    }
+
+    /**
+     * Calculates the signed distance from a point to a line defined by a normal vector.
+     * The sign of the distance indicates which side of the line the point lies on.
+     * 
+     * @param {number} px - X coordinate of the point.
+     * @param {number} py - Y coordinate of the point.
+     * @param {number} cx - X coordinate of a point on the line (e.g., the center point).
+     * @param {number} cy - Y coordinate of a point on the line.
+     * @param {number} nx - X component of the line's normal vector.
+     * @param {number} ny - Y component of the line's normal vector.
+     * @returns {number} - The signed distance from the point to the line.
+     */
+    function signedDistance(px, py, cx, cy, nx, ny) {
+      // Calculate the vector from the line's reference point (cx, cy) to the target point (px, py).
+      const vectorX = px - cx;
+      const vectorY = py - cy;
+
+      // Compute the dot product of the vector and the normal vector of the line.
+      // This projects the vector onto the normal vector, giving the signed distance.
+      return vectorX * nx + vectorY * ny;
+    }
+
+    function updateSplit(mouseX, mouseY) {
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      const centerX = containerWidth / 2;
+      const centerY = containerHeight / 2;
+
+      let deltaX = mouseX - centerX;
+      let deltaY = mouseY - centerY;
+
+      if (deltaX === 0 && deltaY === 0) {
+        deltaX = 0.0001; // Avoid zero vector
+      }
+
+      // Calculate the angle between the center and the mouse position
+      const angleRadians = Math.atan2(deltaY, deltaX);
+
+      // Direction vector of the split line (unit vector)
+      const lineDirX = Math.cos(angleRadians);
+      const lineDirY = Math.sin(angleRadians);
+
+      // Normal vector: perpendicular to the direction vector
+      const normalX = lineDirY;
+      const normalY = -lineDirX;
+
+      // Define the corners of the viewport
+      const viewportCorners = [
+        { x: 0, y: 0 },
+        { x: containerWidth, y: 0 },
+        { x: containerWidth, y: containerHeight },
+        { x: 0, y: containerHeight }
+      ];
+
+      // Define the edges of the viewport
+      const viewportEdges = [
+        [{ x: 0, y: 0 }, { x: containerWidth, y: 0 }],   // Top edge
+        [{ x: containerWidth, y: 0 }, { x: containerWidth, y: containerHeight }],   // Right edge
+        [{ x: containerWidth, y: containerHeight }, { x: 0, y: containerHeight }],   // Bottom edge
+        [{ x: 0, y: containerHeight }, { x: 0, y: 0 }]    // Left edge
+      ];
+
+      // Find intersections of the split line with the viewport edges
+      let intersectionPoints = [];
+      for (const edge of viewportEdges) {
+        const intersection = lineSegmentIntersection(centerX, centerY, lineDirX, lineDirY, edge[0], edge[1]);
+        if (intersection) intersectionPoints.push(intersection);
+      }
+
+      // Separate corners into left and right groups based on the signed distance
+      let leftSidePoints = [];
+      let rightSidePoints = [];
+
+      for (const corner of viewportCorners) {
+        const distance = signedDistance(corner.x, corner.y, centerX, centerY, normalX, normalY);
+        if (distance < 0) {
+          leftSidePoints.push(corner);
+        } else {
+          rightSidePoints.push(corner);
+        }
+      }
+
+      // Add intersection points to both sides
+      leftSidePoints.push(...intersectionPoints);
+      rightSidePoints.push(...intersectionPoints);
+
+      // Order points clockwise for clip-path polygons
+      orderPointsClockwise(leftSidePoints);
+      orderPointsClockwise(rightSidePoints);
+
+      // Convert points to clip-path format
+      const pointsToClipPath = (points) => points.map(point => `${point.x}px ${point.y}px`).join(', ');
+
+      // Update the clip-path for both sides
+      leftSide.style.clipPath = `polygon(${pointsToClipPath(leftSidePoints)})`;
+      rightSide.style.clipPath = `polygon(${pointsToClipPath(rightSidePoints)})`;
+    }
+
+    // Initialize with vertical split on page load
+    updateSplit(window.innerWidth / 2, window.innerHeight / 2);
+
+    // Update on mouse enter and move
+    container.addEventListener('mouseenter', e => {
+      updateSplit(e.clientX, e.clientY);
+    });
+
+    container.addEventListener('mousemove', e => {
+      updateSplit(e.clientX, e.clientY);
+    });
+
+    // Add touch event listeners for mobile support
+    container.addEventListener('touchstart', e => {
+      const touch = e.touches[0];
+      updateSplit(touch.clientX, touch.clientY);
+    });
+
+    container.addEventListener('touchmove', e => {
+      const touch = e.touches[0];
+      updateSplit(touch.clientX, touch.clientY);
+    });
+
+    // Reset on mouse leave
+    container.addEventListener('mouseleave', () => {
+      leftSide.style.clipPath = 'polygon(0 0, 50% 0, 50% 100%, 0 100%)';
+      rightSide.style.clipPath = 'polygon(50% 0, 100% 0, 100% 100%, 50% 100%)';
+    });
+
+    container.addEventListener('touchend', () => {
+      leftSide.style.clipPath = 'polygon(0 0, 50% 0, 50% 100%, 0 100%)';
+      rightSide.style.clipPath = 'polygon(50% 0, 100% 0, 100% 100%, 50% 100%)';
+    });
+  </script>
+</body>
+
+</html>
