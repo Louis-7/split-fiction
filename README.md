@@ -1,6 +1,8 @@
 # Split Fiction
 
-Split Fiction is a dynamic rotating split-screen web application. It creates an interactive visual effect where the screen is divided into two sections, and the split dynamically adjusts based on user interaction. [Try it!](https://louis-7.github.io/split-fiction/)
+Split Fiction is a dynamic rotating split-screen web page. It creates an interactive visual effect where the screen is divided into two sections, and the split dynamically adjusts based on user interaction. [Try it!](https://louis-7.github.io/split-fiction/)
+
+<img width="1680" alt="Screenshot 2025-04-19 at 12 28 19" src="https://github.com/user-attachments/assets/8c933af4-766a-419c-a157-48c469da458c" />
 
 ## Features
 
